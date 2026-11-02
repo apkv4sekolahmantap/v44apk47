@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="id" data-theme="light" data-bs-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#7C3AED">
+<title>Apk Sekolah Mantap</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%237C3AED'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.3/css/bootstrap.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.11.3/font/bootstrap-icons.min.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="css/style.css?v=4.3">
+<script src="js/config.js?v=4.3"></script>
+</head>
+<body>
+<div id="boot" class="boot"><div class="text-center"><div class="spinner-border text-primary" role="status"></div><div style="margin-top:12px;font:14px sans-serif;color:#475569">Memuat aplikasi&#8230;</div></div></div>
+
+<!-- LOGIN -->
+<div id="loginView" class="login-wrap d-none">
+  <form class="card-x login-card" onsubmit="doLoginUI(event)">
+    <div class="logo-img brand-ic mx-auto mb-3"><i class="bi bi-journal-bookmark-fill"></i></div>
+    <h1 class="h4 fw-extra text-center mb-1">Apk Sekolah Mantap</h1>
+    <p class="text-center text-secondary mb-4">Sistem informasi sekolah &#183; khusus pengguna terdaftar</p>
+    <label class="form-label small fw-semibold" for="lu">Username</label>
+    <input id="lu" class="form-control mb-3" autocomplete="username" required>
+    <label class="form-label small fw-semibold" for="lp">Password</label>
+    <input id="lp" type="password" class="form-control mb-4" autocomplete="current-password" required>
+    <button id="btnLogin" class="btn btn-pri w-100" type="submit"><i class="bi bi-box-arrow-in-right"></i> Masuk</button>
+    <button type="button" class="btn btn-link w-100 mt-2" onclick="toggleTheme()"><i class="bi bi-circle-half"></i> Terang / Gelap</button>
+    <div class="text-center small text-secondary mt-2" id="ver"></div>
+  </form>
+</div>
+
+<!-- APLIKASI (disembunyikan sampai login) -->
+<div id="appView" class="d-none">
+  <nav id="sidebar" class="sidebar" aria-label="Menu utama">
+    <div class="sb-head"><div class="logo-img brand-ic"><i class="bi bi-journal-bookmark-fill"></i></div>
+      <div><div class="fw-bold lh-1" id="sbName">SDN 047 Tarakan</div><small class="text-secondary" id="sbSub">Apk Sekolah Mantap</small></div></div>
+    <ul id="nav" class="sb-nav"></ul>
+    <div class="sb-foot">
+      <div class="small mb-2 d-flex gap-2 align-items-center"><div class="avatar" id="uPhoto"></div><div><div class="fw-bold" id="uName"></div><div class="text-secondary" id="uRole"></div></div></div>
+      <div class="d-flex gap-2">
+        <button class="btn btn-outline-secondary flex-fill" onclick="toggleTheme()" aria-label="Ganti tema"><i class="bi bi-circle-half"></i></button>
+        <button class="btn btn-outline-danger flex-fill" onclick="logout()"><i class="bi bi-box-arrow-left"></i> Keluar</button>
+      </div>
+    </div>
+  </nav>
+  <div id="ov" class="sb-ov" onclick="toggleSb()"></div>
+  <div id="progress"></div>
+  <main class="main">
+    <header class="topbar">
+      <button class="btn btn-light d-lg-none" onclick="toggleSb()" aria-label="Buka menu"><i class="bi bi-list fs-5"></i></button>
+      <h1 id="pageTitle" class="h4 fw-extra m-0"></h1>
+      <select id="taSel" class="form-select form-select-sm w-auto ms-auto d-none" aria-label="Tahun Ajaran" onchange="gantiTA(this.value)"></select>
+    </header>
+    <div id="app-container"></div>
+  </main>
+  <nav id="bnav" class="bnav d-lg-none" aria-label="Menu cepat"></nav>
+</div>
+
+<div id="pubView" class="d-none"></div>
+<div class="offcanvas offcanvas-end" id="drw" tabindex="-1" style="width:min(480px,100vw)"><div class="offcanvas-header"><div><h2 class="h5 m-0"><i class="bi bi-shield-check text-primary"></i> Verifikasi Integritas & Audit</h2><code class="small" id="drwSub"></code></div><button class="btn-close" data-bs-dismiss="offcanvas" aria-label="Tutup"></button></div>
+<div class="offcanvas-body" id="drwBody"></div><div class="p-3 border-top"><div id="drwStat" class="mb-2"></div><div class="d-flex flex-wrap gap-2"><button class="btn btn-pri flex-grow-1" onclick="dl(S.di)"><i class="bi bi-download"></i> Unduh Ulang</button><button class="btn btn-outline-primary" onclick="reverify()"><i class="bi bi-arrow-repeat"></i> Verifikasi Ulang</button><button class="btn btn-outline-secondary" onclick="showCert(S.di)"><i class="bi bi-patch-check"></i> Sertifikat</button><button class="btn btn-outline-secondary" onclick="cp(S.dUrl)"><i class="bi bi-link-45deg"></i> Salin Tautan</button></div></div></div>
+<!-- Modal tunggal: form, pratinjau, QR, konfirmasi, hasil impor -->
+<div class="modal fade" id="mdl" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-dialog-scrollable" id="mdlDlg"><div class="modal-content">
+  <div class="modal-header"><h2 class="modal-title h5" id="mdlTitle"></h2><button class="btn-close" data-bs-dismiss="modal" aria-label="Tutup"></button></div>
+  <div class="modal-body" id="mdlBody"></div><div class="modal-footer" id="mdlFoot"></div>
+</div></div></div>
+
+<div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index:2000">
+  <div id="toast" class="toast" role="alert"><div class="d-flex"><div class="toast-body" id="toastBody"></div><button class="btn-close me-2 m-auto" data-bs-dismiss="toast" aria-label="Tutup"></button></div></div>
+</div>
+<div id="faceView" class="d-none" role="dialog" aria-label="Presensi wajah"></div>
+<div id="printArea"></div>
+
+
+<script src="js/app.js?v=4.3"></script>
+<script src="js/games.js?v=4.3"></script>
+<script src="js/tools.js?v=4.3"></script>
+<script src="js/modules.js?v=4.3"></script>
+<script src="js/pages.js?v=4.3"></script>
+<script src="js/kenaikan-kelas.js?v=4.3"></script>
+<script src="js/v41.js?v=4.3"></script>
+<script src="js/nilai-grid.js?v=4.3"></script>
+<script src="js/ai.js?v=4.3"></script>
+<script src="js/bais.js?v=4.3"></script>
+<script src="js/games4.js?v=4.3"></script>
+<script src="js/v43.js?v=4.3"></script>
+</body>
+</html>
