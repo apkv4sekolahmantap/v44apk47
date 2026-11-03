@@ -352,8 +352,8 @@ function raporCetak(){
   cetak(`<div style="font-family:Arial;font-size:12px">${kop()}<h3 style="text-align:center;margin:0">LAPORAN HASIL BELAJAR (RAPOR)</h3><p style="text-align:center;margin:2px 0 10px">Semester ${esc(sm)} · Tahun Ajaran ${esc(S.ta||'')}</p>
   <table style="width:100%;margin-bottom:8px"><tr><td style="width:90px">Nama</td><td>: ${esc(s.Nama)}</td><td style="width:90px">Kelas</td><td>: ${esc(s.Kelas)}</td></tr><tr><td>NISN</td><td>: ${esc(s.NISN)}</td><td>Rata-rata</td><td>: ${avg}</td></tr></table>
   <table border="1" cellpadding="5" style="border-collapse:collapse;width:100%"><thead><tr style="background:#eee"><th>No</th><th>Mata Pelajaran</th><th>Nilai Akhir</th><th>Capaian Kompetensi</th></tr></thead><tbody>${rs.map((r,i)=>`<tr><td align="center">${i+1}</td><td>${esc(r.Mapel)}</td><td align="center"><b>${esc(r.NilaiAkhir)}</b></td><td>${esc(r.Capaian)}</td></tr>`).join('')}</tbody></table>
-  <div style="display:flex;justify-content:space-between;margin-top:40px"><div>Orang Tua/Wali<br><br><br>(.................)</div><div style="text-align:right">Wali Kelas<br><br><br>(.................)</div></div>
-  <div style="text-align:center;margin-top:24px">Kepala Sekolah<br><br><br><u>${esc((S.cfg&&S.cfg.kepsekNama)||'.................')}</u></div></div>`);
+  <div style="display:flex;justify-content:space-between;margin-top:40px"><div>Orang Tua/Wali<br><br><br>(.................)</div><div style="text-align:right">${esc(ttdTempatTgl())}<br>Wali Kelas ${esc(s.Kelas)}<br><br><br><u>${esc((typeof ttdWaliNama==='function'&&ttdWaliNama(s.Kelas))||'.................')}</u></div></div><!--ttd-->
+  <div style="text-align:center;margin-top:24px">Mengetahui,<br>Kepala Sekolah<br><br><br><u>${esc((S.cfg&&S.cfg.kepsekNama)||'.................')}</u></div></div>`);
 }
 // ── Bank soal: cetak lembar soal ──
 TBX.banksoal=()=>'<button class="btn btn-outline-success" onclick="soalUI()"><i class="bi bi-printer"></i> Cetak Lembar Soal</button>';

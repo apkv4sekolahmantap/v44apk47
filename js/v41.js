@@ -52,7 +52,7 @@ function ttdA4(t){ // t = {tempat,tanggal,kiri:{atas?,jabatan,nama,nip},kanan:{.
   const tk=(t.tempat||'Tarakan')+', '+(t.tanggal||tglPanjang(tglIni())),ki=Object.assign({},t.kiri),ka=Object.assign({},t.kanan),te=t.tengah?Object.assign({},t.tengah):null;
   if(ki.atas===undefined)ki.atas=tk;if(ka.atas===undefined)ka.atas=te?'':'Mengetahui,';if(te&&te.atas===undefined)te.atas='';
   const w=te?'33.33%':'50%',blk=x=>`<td style="width:${w};text-align:center;vertical-align:top;padding:0 6px"><div style="min-height:1.3em">${x.atas?esc(x.atas):'&nbsp;'}</div><div>${esc(x.jabatan||'')}${x.jabatan?',':''}</div><div style="height:22mm"></div><div style="font-weight:bold;text-decoration:underline">${esc(x.nama||'(............................................)')}</div>${x.nip===null?'':'<div>NIP. '+esc(x.nip||'.........................')+'</div>'}</td>`;
-  return `<table style="width:100%;margin-top:14px;border-collapse:collapse;page-break-inside:avoid;${A4F}"><tr>${blk(ki)}${te?blk(te):''}${blk(ka)}</tr></table>`;
+  return `<table data-ttd="1" style="width:100%;margin-top:14px;border-collapse:collapse;page-break-inside:avoid;${A4F}"><tr>${blk(ki)}${te?blk(te):''}${blk(ka)}</tr></table>`;
 }
 function tabelA4(hdr,rows,o){
   o=o||{};const w=o.widths||[],sum=w.reduce((a,b)=>a+b,0)||1,fs=(o.fontSize||9.5)+'pt',ctr=o.center||[],rgt=o.right||[];
@@ -255,7 +255,7 @@ async function mnSimpan(){
 const _renderLap=renderLap;
 renderLap=async function(){
   await _renderLap();const c=$('app-container');if(!c||S.cur!=='laporan')return;
-  c.insertAdjacentHTML('afterbegin',`<div class="card-x p-3 mb-3 d-flex flex-wrap gap-2 align-items-center"><div class="me-auto"><div class="fw-bold"><i class="bi bi-file-earmark-text"></i> Laporan Bulanan A4 (akhir bulan)</div><div class="small text-secondary">Kop surat, rekap per siswa, dan tanda tangan Wali Kelas &amp; Kepala Sekolah.</div></div><button class="btn btn-pri" onclick="lapA4UI('hadir')"><i class="bi bi-printer"></i> Laporan Kehadiran</button></div>`);
+  c.insertAdjacentHTML('afterbegin',`<div class="card-x p-3 mb-3 d-flex flex-wrap gap-2 align-items-center"><div class="me-auto"><div class="fw-bold"><i class="bi bi-file-earmark-text"></i> Laporan Kehadiran A4 (pilih periode tanggal)</div><div class="small text-secondary">Pilih tanggal Dari – Sampai. Kop surat, rekap per siswa, tempat &amp; tanggal, serta tanda tangan Wali Kelas &amp; Kepala Sekolah.</div></div><button class="btn btn-pri" onclick="lapA4UI('hadir')"><i class="bi bi-printer"></i> Laporan Kehadiran</button></div>`);
 };
 CRX.jurnal=(c,el)=>{el.innerHTML=`<div class="card-x p-3 d-flex flex-wrap gap-2 align-items-center"><div class="me-auto"><div class="fw-bold"><i class="bi bi-file-earmark-text"></i> Laporan Jurnal Mengajar Bulanan (A4)</div><div class="small text-secondary">Satu bulan per guru, lengkap kop surat dan tanda tangan Wali Kelas &amp; Kepala Sekolah.</div></div><button class="btn btn-pri" onclick="lapA4UI('jurnal')"><i class="bi bi-printer"></i> Buat Laporan</button></div>`};
 async function lapA4UI(kind){
