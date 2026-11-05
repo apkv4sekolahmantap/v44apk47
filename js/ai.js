@@ -11,53 +11,142 @@ const aiKeyName=()=>'ai_cfg_'+((S.user&&S.user.Username)||'x');
 function aiCfg(){for(const st of [localStorage,sessionStorage]){try{const j=JSON.parse(st.getItem(aiKeyName())||'null');if(j&&j.key)return j}catch(e){}}return{}}
 function aiSaveCfg(c,ingat){try{localStorage.removeItem(aiKeyName());sessionStorage.removeItem(aiKeyName())}catch(e){}try{(ingat?localStorage:sessionStorage).setItem(aiKeyName(),JSON.stringify(c))}catch(e){}}
 const aiHapus=()=>{try{localStorage.removeItem(aiKeyName());sessionStorage.removeItem(aiKeyName())}catch(e){}};
+// Daftar bawaan (cadangan). Daftar sebenarnya dimuat dari akun Anda lewat tombol "Muat daftar model".
+const AI_LIST={
+  gemini:{t:['gemini-flash-latest','gemini-pro-latest','gemini-flash-lite-latest','gemini-3.5-flash','gemini-2.5-flash','gemini-2.5-flash-lite','gemini-2.5-pro'],i:['gemini-3.1-flash-image','gemini-2.5-flash-image']},
+  openai:{t:['gpt-5.4-mini','gpt-5.4','gpt-5-mini','gpt-4.1-mini','gpt-4o-mini'],i:['gpt-image-2','gpt-image-1']},
+  anthropic:{t:['claude-sonnet-5-5','claude-opus-5-5','claude-haiku-5-5'],i:[]}};
+function aiCached(p){try{const j=JSON.parse(localStorage.getItem('ai_models_'+p)||'null');return j&&j.t&&j.t.length?j:null}catch(e){return null}}
+function aiLists(p){const c=aiCached(p),d=AI_LIST[p];return{t:c?c.t:d.t,i:(c&&c.i&&c.i.length)?c.i:d.i}}
+const aiOpts=(list,cur)=>{const l=!cur||list.indexOf(cur)>=0?list:[cur].concat(list);return l.map(m=>`<option value="${esc(m)}" ${m===cur?'selected':''}>${esc(m)}</option>`).join('')+'<option value="__x">✎ Ketik nama model lain…</option>'};
+const aiSelHtml=(id,list,cur,off)=>off?`<select id="${id}" class="form-select" disabled><option value="">(tidak tersedia)</option></select>`:`<select id="${id}" class="form-select" onchange="aiManual('${id}')">${aiOpts(list,cur)}</select><input id="${id}x" class="form-control mt-1 d-none" placeholder="ketik nama model persis" autocomplete="off">`;
+function aiManual(id){const v=$(id).value;$(id+'x').classList.toggle('d-none',v!=='__x')}
+const aiMV=id=>{const s=$(id);if(!s)return '';return s.value==='__x'?(($(id+'x')||{}).value||'').trim():s.value};
+function aiSetSel(id,val){const s=$(id);if(!s)return;if(![...s.options].some(o=>o.value===val)){const o=document.createElement('option');o.value=val;o.textContent=val;s.insertBefore(o,s.options[s.options.length-1])}s.value=val;aiManual(id)}
+function aiPickText(p,l){
+  const f=re=>l.find(x=>re.test(x));
+  if(p==='gemini')return f(/^gemini-flash-latest$/)||f(/flash.*latest/)||f(/flash/)||l[0];
+  if(p==='openai')return f(/mini/)||l[0];
+  return f(/sonnet/)||l[0];
+}
+async function aiListModels(p,key){
+  if(p==='gemini'){
+    let all=[],tok='';
+    do{const j=await aiFetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200'+(tok?'&pageToken='+encodeURIComponent(tok):''),{headers:{'x-goog-api-key':key}});all=all.concat(j.models||[]);tok=j.nextPageToken||''}while(tok&&all.length<800);
+    const t=[],i=[];
+    all.forEach(m=>{const n=String(m.name||'').replace(/^models\//,''),g=m.supportedGenerationMethods||[];if(g.indexOf('generateContent')<0)return;
+      if(/image/i.test(n)&&!/imagen|embed/i.test(n))i.push(n);
+      else if(/^gemini/i.test(n)&&!/image|tts|embed|live|audio|veo|robotics|computer-use|aqa|learnlm|native-audio/i.test(n))t.push(n)});
+    const rank=n=>(/-latest$/.test(n)?0:1)+(/flash/.test(n)?0:/pro/.test(n)?0.3:0.6);
+    t.sort((a,b)=>rank(a)-rank(b)||b.localeCompare(a));i.sort((a,b)=>b.localeCompare(a));
+    return{t:t,i:i,at:Date.now()};
+  }
+  if(p==='openai'){
+    const j=await aiFetch('https://api.openai.com/v1/models',{headers:{Authorization:'Bearer '+key}}),ids=(j.data||[]).map(x=>x.id);
+    const t=ids.filter(n=>/^(gpt-|o\d|chatgpt)/.test(n)&&!/image|audio|realtime|transcribe|tts|search|embed|moderation|instruct|codex|whisper|dall|vision-preview|-\d{4}-\d{2}-\d{2}$/.test(n)).sort((a,b)=>b.localeCompare(a));
+    const i=ids.filter(n=>/^gpt-image/.test(n)).sort((a,b)=>b.localeCompare(a));
+    return{t:t,i:i,at:Date.now()};
+  }
+  const j=await aiFetch('https://api.anthropic.com/v1/models?limit=100',{headers:{'x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'}});
+  return{t:(j.data||[]).map(x=>x.id),i:[],at:Date.now()};
+}
+// Gemini: model terpilih lebih dulu, lalu model cadangan bila sedang padat (high demand) atau kuota model itu habis
+function aiFallbackModels(model){
+  const c=aiCached('gemini'),base=(c?c.t:AI_LIST.gemini.t).filter(m=>/flash|pro/i.test(m)&&!/image|tts|live/i.test(m));
+  const pref=['gemini-flash-latest','gemini-2.5-flash','gemini-flash-lite-latest','gemini-2.5-flash-lite','gemini-3.5-flash'].filter(m=>!c||base.indexOf(m)>=0);
+  return [...new Set([model].concat(pref,base))].slice(0,4);
+}
 function aiSettingsUI(after){
-  const c=aiCfg(),p=c.p||'gemini',ingat=c.ingat!==false;
+  const c=aiCfg(),p=c.p||'gemini',ingat=c.ingat!==false,L=aiLists(p);
   openModal('Pengaturan AI — akun '+esc(S.user.Username||''),`<p class="small text-secondary">Masukkan <b>API key milik Anda sendiri</b>. Kunci hanya disimpan di peramban ini untuk akun Anda; tidak dikirim ke server aplikasi dan tidak terlihat pengguna lain atau Admin. Biaya/kuota penggunaan mengikuti akun API Anda.</p>
    <div class="row g-2"><div class="col-12"><label class="form-label small fw-semibold" for="aiP">Penyedia AI</label><select id="aiP" class="form-select" onchange="aiPSel()">${Object.keys(AI.P).map(k=>`<option value="${k}" ${k===p?'selected':''}>${AI.P[k].n}</option>`).join('')}</select><div class="form-text"><a id="aiL" href="${AI.P[p].link}" target="_blank" rel="noopener">Dapatkan API key ↗</a></div></div>
-   <div class="col-12"><label class="form-label small fw-semibold" for="aiK">API key</label><input id="aiK" type="password" class="form-control" autocomplete="off" value="${esc(c.key||'')}" placeholder="tempel API key di sini"></div>
-   <div class="col-md-6"><label class="form-label small fw-semibold" for="aiM">Model teks</label><input id="aiM" class="form-control" value="${esc(c.m||AI.P[p].m)}"></div>
-   <div class="col-md-6"><label class="form-label small fw-semibold" for="aiI">Model gambar</label><input id="aiI" class="form-control" value="${esc(c.im||AI.P[p].im)}" ${AI.P[p].img?'':'disabled'} placeholder="(tidak tersedia)"></div>
+   <div class="col-12"><label class="form-label small fw-semibold" for="aiK">API key</label><input id="aiK" type="password" class="form-control" autocomplete="off" value="${esc(c.key||'')}" placeholder="tempel API key di sini" onchange="aiMuat(true)"></div>
+   <div class="col-md-6"><label class="form-label small fw-semibold" for="aiM">Model teks</label><div id="aiMW">${aiSelHtml('aiM',L.t,c.m||AI.P[p].m,false)}</div></div>
+   <div class="col-md-6"><label class="form-label small fw-semibold" for="aiI">Model gambar</label><div id="aiIW">${AI.P[p].img?aiSelHtml('aiI',L.i,c.im||AI.P[p].im,false):aiSelHtml('aiI',[],'',true)}</div></div>
+   <div class="col-12 d-flex flex-wrap gap-2 align-items-center"><button type="button" class="btn btn-sm btn-outline-primary" onclick="aiMuat()"><i class="bi bi-arrow-repeat"></i> Muat daftar model dari akun saya</button><span class="small" id="aiMS"></span></div>
    <div class="col-12"><div class="form-check"><input class="form-check-input" type="checkbox" id="aiR" ${ingat?'checked':''}><label class="form-check-label small" for="aiR">Ingat di perangkat ini (matikan bila memakai komputer bersama; kunci terhapus saat peramban ditutup)</label></div></div></div><div id="aiT" class="small mt-2"></div>`,
    '<button class="btn btn-outline-danger me-auto" onclick="aiHapus();closeModal();toast(\'Dihapus\',\'API key dihapus dari peramban ini.\',\'info\')">Hapus kunci</button><button class="btn btn-outline-secondary" onclick="aiUji()">Uji koneksi</button><button class="btn btn-pri" onclick="aiSimpan()">Simpan</button>');
   window.__aiAfter=after;
+  setTimeout(()=>{if($('aiK')&&$('aiK').value.trim())aiMuat(true)},250);
 }
-function aiPSel(){const p=$('aiP').value;$('aiL').href=AI.P[p].link;$('aiM').value=AI.P[p].m;$('aiI').value=AI.P[p].im;$('aiI').disabled=!AI.P[p].img}
-function aiFormCfg(){return{p:$('aiP').value,key:$('aiK').value.trim(),m:$('aiM').value.trim(),im:$('aiI').value.trim(),ingat:$('aiR').checked}}
-function aiSimpan(){const c=aiFormCfg();if(!c.key)return toast('Lengkapi','Isi API key.','warning');aiSaveCfg(c,c.ingat);closeModal();toast('Tersimpan','Pengaturan AI disimpan untuk akun Anda.','success');if(window.__aiAfter)window.__aiAfter()}
+function aiPSel(){
+  const p=$('aiP').value,L=aiLists(p);$('aiL').href=AI.P[p].link;
+  $('aiMW').innerHTML=aiSelHtml('aiM',L.t,AI.P[p].m,false);$('aiIW').innerHTML=AI.P[p].img?aiSelHtml('aiI',L.i,AI.P[p].im,false):aiSelHtml('aiI',[],'',true);
+  $('aiMS').textContent='';$('aiT').textContent='';if($('aiK').value.trim())aiMuat(true);
+}
+function aiFormCfg(){return{p:$('aiP').value,key:$('aiK').value.trim(),m:aiMV('aiM'),im:aiMV('aiI'),ingat:$('aiR').checked}}
+function aiSimpan(){const c=aiFormCfg();if(!c.key)return toast('Lengkapi','Isi API key.','warning');if(!c.m)return toast('Lengkapi','Pilih model teks.','warning');aiSaveCfg(c,c.ingat);closeModal();toast('Tersimpan','Pengaturan AI disimpan untuk akun Anda.','success');if(window.__aiAfter)window.__aiAfter()}
+// Terapkan daftar model dari akun ke menu pilihan; model yang tidak tersedia diganti otomatis
+function aiApplyList(p,l){
+  try{localStorage.setItem('ai_models_'+p,JSON.stringify(l))}catch(e){}
+  let ct=aiMV('aiM'),ci=aiMV('aiI'),note='';
+  if(l.t.length&&$('aiM').value!=='__x'&&l.t.indexOf(ct)<0){const alt=aiPickText(p,l.t);note+='Model teks "'+ct+'" tidak tersedia di akun Anda → dipilih "'+alt+'". ';ct=alt}
+  if(AI.P[p].img){const li=l.i.length?l.i:AI_LIST[p].i;if(li.length&&$('aiI').value!=='__x'&&li.indexOf(ci)<0){note+='Model gambar "'+ci+'" tidak tersedia → dipilih "'+li[0]+'". ';ci=li[0]}$('aiIW').innerHTML=aiSelHtml('aiI',li,ci,false)}
+  $('aiMW').innerHTML=aiSelHtml('aiM',l.t.length?l.t:AI_LIST[p].t,ct,false);
+  return note;
+}
+async function aiMuat(silent){
+  const p=$('aiP').value,key=$('aiK').value.trim(),st=$('aiMS');
+  if(!key){if(!silent)toast('Lengkapi','Isi API key terlebih dahulu.','warning');return null}
+  st.innerHTML='<span class="spinner-border spinner-border-sm"></span> Memuat daftar model…';
+  try{const l=await aiListModels(p,key),note=aiApplyList(p,l);
+    st.innerHTML='<span class="text-success"><i class="bi bi-check-circle"></i> '+l.t.length+' model teks, '+l.i.length+' model gambar tersedia di akun Anda.</span>'+(note?'<div class="text-warning-emphasis">'+esc(note)+'</div>':'');return l}
+  catch(e){st.innerHTML='<span class="'+(silent?'text-secondary':'text-danger')+'">'+(silent?'Daftar model belum dapat dimuat: ':'')+esc(e.message)+'</span>';return null}
+}
 async function aiUji(){
-  const c=aiFormCfg();if(!c.key)return toast('Lengkapi','Isi API key.','warning');aiSaveCfg(c,c.ingat);$('aiT').innerHTML='<span class="spinner-border spinner-border-sm"></span> Menguji…';
-  try{const t=await aiText('Balas hanya dengan kata: SIAP',{max:20});$('aiT').innerHTML='<span class="text-success"><i class="bi bi-check-circle"></i> Terhubung. Balasan: '+esc(String(t).slice(0,40))+'</span>'}catch(e){$('aiT').innerHTML='<span class="text-danger"><i class="bi bi-x-circle"></i> '+esc(e.message)+'</span>'}
+  const T=$('aiT'),sp='<span class="spinner-border spinner-border-sm"></span> ',ok=m=>'<span class="text-success"><i class="bi bi-check-circle"></i> '+m+'</span>',wr=m=>'<span class="text-warning-emphasis"><i class="bi bi-exclamation-triangle"></i> '+m+'</span>',er=m=>'<span class="text-danger"><i class="bi bi-x-circle"></i> '+m+'</span>';
+  let c=aiFormCfg();if(!c.key)return toast('Lengkapi','Isi API key.','warning');
+  let keyOk=false;
+  T.innerHTML=sp+'Langkah 1/2: memeriksa API key…';
+  try{const l=await aiListModels(c.p,c.key),note=aiApplyList(c.p,l);keyOk=true;$('aiMS').innerHTML='<span class="text-success"><i class="bi bi-check-circle"></i> '+l.t.length+' model teks, '+l.i.length+' model gambar tersedia di akun Anda.</span>'+(note?'<div class="text-warning-emphasis">'+esc(note)+'</div>':'')}
+  catch(e){if([400,401,403].indexOf(e.status)>=0){T.innerHTML=er(esc(e.message));return}}
+  c=aiFormCfg();aiSaveCfg(c,c.ingat);const awal=c.m;
+  T.innerHTML=sp+(keyOk?'API key valid. ':'')+'Langkah 2/2: menguji model <b>'+esc(c.m)+'</b>…';
+  try{
+    AI.used='';const t=await aiText('Balas hanya dengan kata: SIAP',{quick:true,max:30}),dipakai=AI.used||c.m;
+    if(dipakai!==c.m){aiSetSel('aiM',dipakai);c=aiFormCfg();aiSaveCfg(c,c.ingat);T.innerHTML=ok('Terhubung. Model <b>'+esc(awal)+'</b> sedang padat, jadi dialihkan otomatis ke <b>'+esc(dipakai)+'</b> (sudah dipilih &amp; disimpan). Balasan: '+esc(String(t).slice(0,30)))}
+    else T.innerHTML=ok('Terhubung ke '+esc(AI.P[c.p].n)+'. Model <b>'+esc(dipakai)+'</b> menjawab: '+esc(String(t).slice(0,30)))
+  }catch(e){
+    if([429,500,502,503,504,529].indexOf(e.status)>=0)T.innerHTML=wr((keyOk?'API key valid, tetapi':'')+' model yang dicoba sedang padat/kuotanya habis di sisi penyedia: '+esc(e.message)+' Pengaturan sudah disimpan — coba "Uji koneksi" lagi beberapa menit lagi atau pilih model lain dari menu.');
+    else T.innerHTML=er(esc(e.message));
+  }
 }
 // ── HTTP & penyedia ──
 function aiErr(st,m){
   m=String(m||'');
   if(st===401||st===403||(st===400&&/api[ _]?key|API_KEY/i.test(m)))return 'API key ditolak/tidak valid. Periksa kunci pada Pengaturan AI.';
+  if(st===503||st===529||st===500||st===502||st===504||/high demand|overloaded|currently experiencing|unavailable/i.test(m))return 'Layanan AI sedang padat (high demand) di sisi penyedia — biasanya sementara. Sistem sudah mencoba ulang dan model cadangan; coba lagi beberapa saat lagi atau pilih model lain. ('+m.slice(0,70)+')';
   if(st===429)return 'Kuota/batas permintaan API tercapai. Tunggu sebentar, atau pakai kunci/akun lain.';
   if(st===404)return 'Model tidak ditemukan. Ubah nama model pada Pengaturan AI. ('+m.slice(0,90)+')';
   return 'Layanan AI: '+m.slice(0,220);
 }
-async function aiFetch(url,opt){
-  let r;try{r=await fetch(url,opt)}catch(e){throw new Error('Tidak dapat menghubungi layanan AI (periksa internet/ blokir jaringan).')}
-  const t=await r.text();let j=null;try{j=JSON.parse(t)}catch(e){}
-  if(!r.ok){const m=j&&((j.error&&(j.error.message||j.error))||j.message)||t.slice(0,200);throw new Error(aiErr(r.status,typeof m==='string'?m:JSON.stringify(m)))}
-  return j;
+const aiWait=ms=>new Promise(r=>setTimeout(r,ms));
+async function aiFetch(url,opt,extra){ // extra = jumlah coba-ulang otomatis untuk galat sementara (500/502/503/504/529)
+  extra=extra==null?1:extra;
+  for(let k=0;;k++){
+    let r;try{r=await fetch(url,opt)}catch(e){throw new Error('Tidak dapat menghubungi layanan AI (periksa internet/ blokir jaringan).')}
+    const t=await r.text();let j=null;try{j=JSON.parse(t)}catch(e){}
+    if(r.ok)return j;
+    if(k<extra&&[500,502,503,504,529].indexOf(r.status)>=0){await aiWait(1500*(k+1));continue}
+    const m=j&&((j.error&&(j.error.message||j.error))||j.message)||t.slice(0,200),er=new Error(aiErr(r.status,typeof m==='string'?m:JSON.stringify(m)));er.status=r.status;throw er;
+  }
 }
 async function aiText(prompt,o){
   o=o||{};const c=aiCfg();if(!c.key)throw new Error('NOKEY');const p=c.p||'gemini',model=c.m||AI.P[p].m,sys=o.system||'';
   if(p==='gemini'){
-    const ms=[model];if(model===AI.P.gemini.m)ms.push('gemini-3.5-flash');let last;
-    for(const m of ms){try{
-      const j=await aiFetch('https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(m)+':generateContent',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':c.key},body:JSON.stringify({systemInstruction:sys?{parts:[{text:sys}]}:undefined,contents:[{role:'user',parts:[{text:prompt}]}],generationConfig:Object.assign({temperature:o.temp==null?0.7:o.temp},o.json?{responseMimeType:'application/json'}:{})})});
-      const pt=(((j.candidates||[])[0]||{}).content||{}).parts;if(!pt)throw new Error('Respons AI kosong (mungkin ditahan filter keamanan). Ubah topik lalu coba lagi.');return pt.map(x=>x.text||'').join('');
-    }catch(e){last=e;if(!/Model tidak ditemukan/.test(e.message))throw e}}throw last;
+    let last;
+    for(const m of aiFallbackModels(model)){try{
+      const j=await aiFetch('https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(m)+':generateContent',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':c.key},body:JSON.stringify({systemInstruction:sys?{parts:[{text:sys}]}:undefined,contents:[{role:'user',parts:[{text:prompt}]}],generationConfig:Object.assign({temperature:o.temp==null?0.7:o.temp},o.json?{responseMimeType:'application/json'}:{})})},(m===model&&!o.quick)?1:0);
+      const pt=(((j.candidates||[])[0]||{}).content||{}).parts;if(!pt)throw new Error('Respons AI kosong (mungkin ditahan filter keamanan). Ubah topik lalu coba lagi.');AI.used=m;return pt.map(x=>x.text||'').join('');
+    }catch(e){last=e;if([404,429,500,502,503,504,529].indexOf(e.status)<0)throw e}} // model padat/tak ada → coba model cadangan
+    throw last;
   }
   if(p==='openai'){
     const j=await aiFetch('https://api.openai.com/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+c.key},body:JSON.stringify(Object.assign({model:model,messages:(sys?[{role:'system',content:sys}]:[]).concat([{role:'user',content:prompt}])},o.json?{response_format:{type:'json_object'}}:{}))});
-    return j.choices[0].message.content;
+    AI.used=model;return j.choices[0].message.content;
   }
   const j=await aiFetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':c.key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:model,max_tokens:o.max||8000,system:sys||undefined,messages:[{role:'user',content:prompt}]})});
-  return (j.content||[]).map(x=>x.text||'').join('');
+  AI.used=model;return (j.content||[]).map(x=>x.text||'').join('');
 }
 function aiJson(t){
   t=String(t||'').replace(/^\s*```(?:json)?/i,'').replace(/```\s*$/,'').trim();
@@ -135,17 +224,17 @@ function renderGenSoal(){
    <div class="col-12 col-md-4"><label class="form-label small fw-semibold" for="gsW">Waktu</label><input id="gsW" class="form-control" value="60 menit"></div>
    <div class="col-12"><label class="form-label small fw-semibold" for="gsP">Tujuan pembelajaran (opsional)</label><input id="gsP" class="form-control" placeholder="mis. Peserta didik dapat menjelaskan proses siklus air"></div></div></div>
    <div class="row g-3 mb-3">${tipe('pg','Pilihan Ganda',10,40,'bi-ui-radios')}${tipe('is','Isian Singkat',0,30,'bi-pencil')}${tipe('mj','Menjodohkan',0,10,'bi-arrow-left-right')}${tipe('ur','Uraian',0,15,'bi-text-paragraph')}</div>
-   <div class="card-x p-3 mb-3"><div class="row g-2 align-items-end"><div class="col-md-5"><label class="form-label small fw-semibold" for="gsG">Jenis gambar</label><select id="gsG" class="form-select"><option value="svg">Ilustrasi vektor (cepat & hemat)</option><option value="ai" ${AI.P[c.p||'gemini'].img?'':'disabled'}>Gambar AI (lebih realistis; butuh model gambar)</option></select></div>
-   <div class="col-md-4"><div class="form-check mt-3"><input class="form-check-input" type="checkbox" id="gsKunci" checked><label class="form-check-label" for="gsKunci">Sertakan kunci & pembahasan</label></div></div><div class="col-md-3"><button class="btn btn-pri w-100" id="gsGo" onclick="gsBuat()"><i class="bi bi-magic"></i> Buat Soal</button></div></div>
+   <div class="card-x p-3 mb-3"><div class="row g-2 align-items-end"><div class="col-md-4"><label class="form-label small fw-semibold" for="gsG">Jenis gambar</label><select id="gsG" class="form-select"><option value="svg">Ilustrasi vektor (cepat & hemat)</option><option value="ai" ${AI.P[c.p||'gemini'].img?'':'disabled'}>Gambar AI (lebih realistis; butuh model gambar)</option></select></div>
+   <div class="col-md-5"><div class="form-check"><input class="form-check-input" type="checkbox" id="gsKunci" checked><label class="form-check-label" for="gsKunci">Sertakan kunci & pembahasan</label></div><div class="form-check"><input class="form-check-input" type="checkbox" id="gsKisi" checked><label class="form-check-label" for="gsKisi">Sertakan <b>kisi-kisi soal</b> (sesuai soal yang dibuat)</label></div></div><div class="col-md-3 d-grid gap-1"><button class="btn btn-pri" id="gsGo" onclick="gsBuat()"><i class="bi bi-magic"></i> Buat Soal</button><button class="btn btn-sm btn-outline-primary" id="gsKisiGo" onclick="gsKisiSaja()"><i class="bi bi-table"></i> Kisi-kisi saja</button></div></div>
    <div class="form-text mt-2">Soal bergambar = berapa soal pertama pada jenis itu yang diberi ilustrasi (0 = tanpa gambar). Gambar menambah waktu dan pemakaian kuota API.</div></div>
-   <div id="gsOut"></div>`;
+   <div id="gsOut"></div><div id="gsKisiOut"></div>`;
   ['pg','is','mj','ur'].forEach(gsTog);
 }
 function gsTog(id){const on=$('gs_'+id).checked;document.querySelectorAll('#gsr_'+id+' input,#gsr_'+id+' select').forEach(x=>x.disabled=!on);$('gsr_'+id).style.opacity=on?1:.45}
 async function gsBuat(){
   if(!aiCfg().key){aiSettingsUI(gsBuat);return}
   const g=id=>$(id).value.trim(),n=(id)=>$('gs_'+id).checked?Math.max(0,Math.min(+$('gs_'+id+'_n').max,+$('gs_'+id+'_n').value||0)):0,gm=(id)=>Math.min(n(id),Math.max(0,+$('gs_'+id+'_g').value||0));
-  const f={mapel:g('gsM'),kelas:g('gsK'),topik:g('gsT'),tp:g('gsP'),level:g('gsL'),judul:g('gsJ')||'Penilaian',waktu:g('gsW'),opsi:+$('gs_opsi').value,pg:n('pg'),is:n('is'),mj:n('mj'),ur:n('ur'),gpg:gm('pg'),gis:gm('is'),gmj:gm('mj'),gur:gm('ur'),mode:g('gsG'),kunci:$('gsKunci').checked};
+  const f={mapel:g('gsM'),kelas:g('gsK'),topik:g('gsT'),tp:g('gsP'),level:g('gsL'),judul:g('gsJ')||'Penilaian',waktu:g('gsW'),opsi:+$('gs_opsi').value,pg:n('pg'),is:n('is'),mj:n('mj'),ur:n('ur'),gpg:gm('pg'),gis:gm('is'),gmj:gm('mj'),gur:gm('ur'),mode:g('gsG'),kunci:$('gsKunci').checked,kisi:$('gsKisi').checked};
   if(!f.mapel||!f.topik)return toast('Lengkapi','Mata pelajaran dan topik wajib diisi.','warning');
   if(f.pg+f.is+f.mj+f.ur<1)return toast('Pilih jenis soal','Aktifkan minimal satu jenis soal.','warning');
   const b=$('gsGo');b.disabled=true;const st=t=>{b.innerHTML='<span class="spinner-border spinner-border-sm"></span> '+t};st('Menyusun soal…');
@@ -153,8 +242,8 @@ async function gsBuat(){
     const sys='Anda guru SD dan penyusun soal ahli Kurikulum Merdeka. Soal harus benar secara konsep, tidak ambigu, sesuai usia, berbahasa Indonesia baku. Keluarkan HANYA JSON valid sesuai skema.';
     const bag=(k,gn,t)=>k?`- ${t}: ${k} butir; isi field "gambar" (deskripsi ilustrasi dalam bahasa Indonesia, maks 20 kata, tanpa teks pada gambar) HANYA untuk ${gn} butir pertama, selebihnya string kosong.\n`:'';
     const prompt=`Susun naskah soal.\nMata pelajaran: ${f.mapel}\nKelas: ${f.kelas} SD\nTopik: ${f.topik}\n${f.tp?'Tujuan pembelajaran: '+f.tp+'\n':''}Tingkat kesulitan: ${f.level}\n\nJenis & jumlah:\n${bag(f.pg,f.gpg,'Pilihan ganda ('+f.opsi+' pilihan: 1 benar, '+(f.opsi-1)+' pengecoh logis; hindari pilihan "semua benar/salah")')}${bag(f.is,f.gis,'Isian singkat (jawaban satu kata/angka/frasa pendek)')}${bag(f.mj,f.gmj,'Menjodohkan (jumlah PASANGAN)')}${bag(f.ur,f.gur,'Uraian (jawaban 2–5 kalimat)')}\nSkema JSON:\n{"pilihan_ganda":[{"soal":"","benar":"teks jawaban benar","salah":["pengecoh1","pengecoh2"],"pembahasan":"","gambar":""}],"isian":[{"soal":"kalimat dengan ........ untuk diisi","kunci":"","pembahasan":"","gambar":""}],"menjodohkan":{"petunjuk":"","pasangan":[{"kiri":"","kanan":"","gambar":""}]},"uraian":[{"soal":"","kunci":"poin-poin jawaban","skor":5,"pembahasan":"","gambar":""}]}\nJenis yang tidak diminta isi dengan array kosong ([]) atau objek menjodohkan dengan pasangan kosong. Jangan menulis apa pun selain JSON.`;
-    const raw=await aiText(prompt,{system:sys,json:true,temp:0.7,max:12000});
-    const d=aiJson(raw);GS.f=f;GS.data=gsRapikan(d,f);
+    const raw=await aiText(prompt+(f.kisi?GS_KISI_ADD:''),{system:sys,json:true,temp:0.7,max:12000});
+    const d=aiJson(raw);GS.f=f;GS.data=gsRapikan(d,f);GS.kf=f;GS.kisi=f.kisi?gsKisiDariSoal(GS.data):null;
     const items=[];GS.data.pg.forEach((x,i)=>{if(i<f.gpg&&x.gambar)items.push(x)});GS.data.is.forEach((x,i)=>{if(i<f.gis&&x.gambar)items.push(x)});GS.data.mj.forEach((x,i)=>{if(i<f.gmj&&x.gambar)items.push(x)});GS.data.ur.forEach((x,i)=>{if(i<f.gur&&x.gambar)items.push(x)});
     if(items.length&&f.mode!=='none'){await aiPool(items,2,async x=>{x.img=await aiGambar(x.gambar,f.mode)},(a,t)=>st('Membuat gambar '+a+'/'+t+'…'))}
     gsTampil();toast('Selesai','Naskah soal siap. Anda dapat mengedit langsung sebelum diunduh.','success');
@@ -162,14 +251,14 @@ async function gsBuat(){
   finally{b.disabled=false;b.innerHTML='<i class="bi bi-magic"></i> Buat Soal'}
 }
 function gsRapikan(d,f){
-  const L='ABCDE';
-  const pg=(d.pilihan_ganda||[]).slice(0,f.pg).filter(x=>x&&x.soal&&x.benar).map(x=>{const op=aiShuf([String(x.benar)].concat((x.salah||[]).map(String).filter(Boolean)).slice(0,f.opsi));return{soal:x.soal,opsi:op,kunci:L[Math.max(0,op.indexOf(String(x.benar)))],benar:String(x.benar),pembahasan:x.pembahasan||'',gambar:x.gambar||''}});
-  const is=(d.isian||[]).slice(0,f.is).filter(x=>x&&x.soal).map(x=>({soal:x.soal,kunci:String(x.kunci||''),pembahasan:x.pembahasan||'',gambar:x.gambar||''}));
+  const L='ABCDE',ksf=x=>({tp:String(x.tp||''),materi:String(x.materi||''),indikator:String(x.indikator||''),level:aiLevel(x.level)});
+  const pg=(d.pilihan_ganda||[]).slice(0,f.pg).filter(x=>x&&x.soal&&x.benar).map(x=>{const op=aiShuf([String(x.benar)].concat((x.salah||[]).map(String).filter(Boolean)).slice(0,f.opsi));return{soal:x.soal,opsi:op,kunci:L[Math.max(0,op.indexOf(String(x.benar)))],benar:String(x.benar),pembahasan:x.pembahasan||'',gambar:x.gambar||'',...ksf(x)}});
+  const is=(d.isian||[]).slice(0,f.is).filter(x=>x&&x.soal).map(x=>({soal:x.soal,kunci:String(x.kunci||''),pembahasan:x.pembahasan||'',gambar:x.gambar||'',...ksf(x)}));
   const pas=((d.menjodohkan||{}).pasangan||[]).slice(0,f.mj).filter(x=>x&&x.kiri&&x.kanan);
   const kanan=aiShuf(pas.map((x,i)=>({t:String(x.kanan),i:i}))),mj=pas.map((x,i)=>({kiri:String(x.kiri),gambar:x.gambar||'',huruf:L[kanan.findIndex(k=>k.i===i)]}));
-  const ur=(d.uraian||[]).slice(0,f.ur).filter(x=>x&&x.soal).map(x=>({soal:x.soal,kunci:String(x.kunci||''),skor:+x.skor||5,pembahasan:x.pembahasan||'',gambar:x.gambar||''}));
+  const ur=(d.uraian||[]).slice(0,f.ur).filter(x=>x&&x.soal).map(x=>({soal:x.soal,kunci:String(x.kunci||''),skor:+x.skor||5,pembahasan:x.pembahasan||'',gambar:x.gambar||'',...ksf(x)}));
   if(!pg.length&&!is.length&&!mj.length&&!ur.length)throw new Error('AI tidak menghasilkan soal yang valid. Coba buat ulang.');
-  return{pg:pg,is:is,mj:mj,mjKanan:kanan.map(k=>k.t),mjPetunjuk:(d.menjodohkan||{}).petunjuk||'Jodohkan pernyataan di kiri dengan pasangan yang tepat di kanan dengan menulis hurufnya.',ur:ur};
+  return{pg:pg,is:is,mj:mj,mjK:ksf(d.menjodohkan||{}),mjKanan:kanan.map(k=>k.t),mjPetunjuk:(d.menjodohkan||{}).petunjuk||'Jodohkan pernyataan di kiri dengan pasangan yang tepat di kanan dengan menulis hurufnya.',ur:ur};
 }
 function gsHtml(){
   const d=GS.data,f=GS.f,e=esc,L='ABCDE';let h=aiKopHtml();
@@ -192,6 +281,7 @@ function gsHtml(){
 function gsTampil(){
   $('gsOut').innerHTML=`<div class="card-x p-3"><div class="d-flex flex-wrap gap-2 mb-3"><button class="btn btn-sm btn-pri" onclick="aiWord($('gsDoc').innerHTML,'Naskah_Soal_'+gsNama())"><i class="bi bi-file-earmark-word"></i> Unduh Word</button><button class="btn btn-sm btn-outline-secondary" onclick="aiCetak($('gsDoc').innerHTML)"><i class="bi bi-printer"></i> Cetak / PDF</button><button class="btn btn-sm btn-outline-success" onclick="gsBank()"><i class="bi bi-collection"></i> Simpan ke Bank Soal</button><button class="btn btn-sm btn-outline-secondary" onclick="gsSalin()"><i class="bi bi-clipboard"></i> Salin teks</button><span class="small text-secondary ms-auto align-self-center">Klik pada naskah untuk mengedit langsung.</span></div>
    <div id="gsDoc" class="ai-paper" contenteditable="true">${gsHtml()}</div></div>`;
+  gsKisiTampil();
   $('gsOut').scrollIntoView({behavior:'smooth'});
 }
 const gsNama=()=>String(GS.f.mapel+'_Kelas'+GS.f.kelas).replace(/\W+/g,'_');
@@ -203,6 +293,70 @@ async function gsBank(){
   d.ur.forEach(q=>rows.push({Mapel:f.mapel,Soal:q.soal,Kelas:f.kelas,Topik:f.topik,Tipe:'Uraian',Kunci:q.kunci,Level:'Sedang',Pembahasan:q.pembahasan}));
   if(!rows.length)return toast('Kosong','Tidak ada soal yang dapat disimpan (pilihan ganda 5 opsi tidak didukung Bank Soal).','warning');
   try{const r=await net('importData','banksoal',rows);toast('Tersimpan',r.berhasil+' soal masuk ke Bank Soal (gambar tidak ikut tersimpan).','success')}catch(e){fail(e)}
+}
+
+// ============================================================
+// KISI-KISI SOAL (tabel: tujuan pembelajaran, materi, indikator, level kognitif, bentuk & nomor soal)
+// ============================================================
+const aiLevel=v=>{v=String(v||'');return /3|penalaran|hots|tinggi|analis|evaluasi|mencipta/i.test(v)?'L3':/2|aplikasi|menerapkan/i.test(v)?'L2':'L1'};
+const GS_KISI_ADD='\n\nTAMBAHAN WAJIB (untuk kisi-kisi): pada SETIAP objek butir di "pilihan_ganda", "isian", "uraian", dan pada objek "menjodohkan", tambahkan empat field string: "tp" (tujuan pembelajaran/kompetensi yang diukur, satu kalimat singkat), "materi" (lingkup materi/subtopik), "indikator" (rumusan indikator soal berawalan "Disajikan ..., peserta didik dapat ..."), dan "level" (isi tepat salah satu: "L1" = pengetahuan & pemahaman, "L2" = aplikasi, "L3" = penalaran/HOTS). Sebarkan level sesuai tingkat kesulitan yang diminta.';
+const KISI_KODE={pg:'PG',is:'IS',mj:'MJ',ur:'UR'},KISI_NAMA={PG:'Pilihan Ganda',IS:'Isian Singkat',MJ:'Menjodohkan',UR:'Uraian'};
+const kisiKode=v=>{v=String(v||'').toUpperCase();return /^PG|PILIHAN/.test(v)?'PG':/^IS|ISIAN/.test(v)?'IS':/^MJ|JODOH/.test(v)?'MJ':/^UR|URAI/.test(v)?'UR':''};
+function kisiRange(a){const o=[];let i=0;while(i<a.length){let j=i;while(j+1<a.length&&a[j+1]===a[j]+1)j++;o.push(j>i?a[i]+'–'+a[j]:String(a[i]));i=j+1}return o.join(', ')}
+function kisiGabung(raw){ // gabungkan butir berurutan yang kompetensi/indikatornya sama
+  const out=[];
+  raw.forEach(r=>{const l=out[out.length-1],key=[r.b,r.tp,r.materi,r.indikator,r.level].join('|');if(l&&l.key===key)l.nums.push(r.n);else out.push({key:key,b:r.b,tp:r.tp,materi:r.materi,indikator:r.indikator,level:r.level,nums:[r.n]})});
+  return out;
+}
+function gsKisiDariSoal(d){
+  const raw=[],add=(b,x,i)=>raw.push({b:b,n:i+1,tp:x.tp||'',materi:x.materi||'',indikator:x.indikator||'',level:x.level||'L1'});
+  d.pg.forEach((q,i)=>add('PG',q,i));d.is.forEach((q,i)=>add('IS',q,i));d.mj.forEach((q,i)=>add('MJ',d.mjK||{},i));d.ur.forEach((q,i)=>add('UR',q,i));
+  return kisiGabung(raw);
+}
+function gsKisiHtml(rows,f){
+  const e=esc,c=S.cfg||{},fase=+f.kelas<=2?'A':+f.kelas<=4?'B':'C',cnt={},lv={L1:0,L2:0,L3:0};let tot=0;
+  rows.forEach(r=>{cnt[r.b]=(cnt[r.b]||0)+r.nums.length;lv[r.level]=(lv[r.level]||0)+r.nums.length;tot+=r.nums.length});
+  const bentuk=['PG','IS','MJ','UR'].filter(k=>cnt[k]).map(k=>cnt[k]+' '+KISI_NAMA[k]).join(', ');
+  const th='border:1px solid #000;padding:3px 5px;background:#e5e7eb;text-align:center;font-size:10.5pt',td='border:1px solid #000;padding:3px 5px;vertical-align:top;font-size:10.5pt';
+  const info=[['Satuan Pendidikan',c.schoolName||''],['Mata Pelajaran',f.mapel],['Kelas / Fase',f.kelas+' / Fase '+fase],['Kurikulum','Kurikulum Merdeka'],['Materi / Topik',f.topik],['Alokasi Waktu',f.waktu||'-'],['Jumlah Soal',tot+' butir ('+bentuk+')'],['Penyusun',(S.user&&S.user.Nama)||'']];
+  return aiKopHtml()+`<div style="text-align:center"><div style="font-size:14pt;font-weight:bold;text-decoration:underline">KISI-KISI ${e(String(f.judul||'Penilaian').toUpperCase())}</div></div>
+   <table style="margin:8px 0;font-size:11pt">${info.map(x=>`<tr><td style="width:150px;padding:1px 4px">${e(x[0])}</td><td style="padding:1px 4px">: ${e(x[1])}</td></tr>`).join('')}</table>
+   <table style="width:100%"><thead><tr><th style="${th};width:28px">No</th><th style="${th}">Tujuan Pembelajaran / Kompetensi</th><th style="${th}">Materi</th><th style="${th}">Indikator Soal</th><th style="${th};width:48px">Level Kognitif</th><th style="${th};width:70px">Bentuk Soal</th><th style="${th};width:60px">No. Soal</th></tr></thead>
+   <tbody>${rows.map((r,i)=>`<tr><td style="${td};text-align:center">${i+1}</td><td style="${td}">${e(r.tp||'-')}</td><td style="${td}">${e(r.materi||'-')}</td><td style="${td}">${e(r.indikator||'-')}</td><td style="${td};text-align:center">${r.level}</td><td style="${td};text-align:center">${KISI_NAMA[r.b]}</td><td style="${td};text-align:center">${r.b} ${kisiRange(r.nums)}</td></tr>`).join('')}</tbody></table>
+   <div style="font-size:10pt;margin-top:6px"><b>Level kognitif:</b> L1 = Pengetahuan &amp; Pemahaman · L2 = Aplikasi · L3 = Penalaran (HOTS). &nbsp;<b>Sebaran:</b> L1 = ${lv.L1} butir, L2 = ${lv.L2} butir, L3 = ${lv.L3} butir. &nbsp;<b>Kode:</b> PG = Pilihan Ganda, IS = Isian Singkat, MJ = Menjodohkan, UR = Uraian.</div>`;
+}
+const gsKisiNama=()=>String(((GS.kf||{}).mapel||'Soal')+'_Kelas'+((GS.kf||{}).kelas||'')).replace(/\W+/g,'_');
+function gsKisiTampil(){
+  const o=$('gsKisiOut');if(!o)return;
+  if(!GS.kisi||!GS.kisi.length){o.innerHTML='';return}
+  o.innerHTML=`<div class="card-x p-3 mt-3"><div class="d-flex flex-wrap gap-2 mb-3 align-items-center"><h2 class="h6 m-0 me-auto"><i class="bi bi-table text-primary"></i> Kisi-kisi Soal</h2><button class="btn btn-sm btn-pri" onclick="aiWord($('gsKisiDoc').innerHTML,'Kisi-kisi_'+gsKisiNama())"><i class="bi bi-file-earmark-word"></i> Unduh Word</button><button class="btn btn-sm btn-outline-secondary" onclick="aiCetak($('gsKisiDoc').innerHTML)"><i class="bi bi-printer"></i> Cetak / PDF</button><button class="btn btn-sm btn-outline-secondary" onclick="gsKisiSalin()"><i class="bi bi-clipboard"></i> Salin teks</button><span class="small text-secondary">Klik pada tabel untuk mengedit langsung.</span></div>
+   <div id="gsKisiDoc" class="ai-paper" contenteditable="true">${gsKisiHtml(GS.kisi,GS.kf||GS.f)}</div></div>`;
+}
+const gsKisiSalin=()=>navigator.clipboard.writeText($('gsKisiDoc').innerText).then(()=>toast('Tersalin','Teks kisi-kisi disalin.','success'),()=>toast('Gagal','Peramban tidak mengizinkan salin.','warning'));
+// Kisi-kisi saja (tanpa menyusun soal) — memakai isian formulir yang sama
+async function gsKisiSaja(){
+  if(!aiCfg().key){aiSettingsUI(gsKisiSaja);return}
+  const g=id=>$(id).value.trim(),n=id=>$('gs_'+id).checked?Math.max(0,Math.min(+$('gs_'+id+'_n').max,+$('gs_'+id+'_n').value||0)):0;
+  const f={mapel:g('gsM'),kelas:g('gsK'),topik:g('gsT'),tp:g('gsP'),level:g('gsL'),judul:g('gsJ')||'Penilaian',waktu:g('gsW'),pg:n('pg'),is:n('is'),mj:n('mj'),ur:n('ur')};
+  if(!f.mapel||!f.topik)return toast('Lengkapi','Mata pelajaran dan topik wajib diisi.','warning');
+  if(f.pg+f.is+f.mj+f.ur<1)return toast('Pilih jenis soal','Aktifkan minimal satu jenis soal beserta jumlahnya.','warning');
+  const b=$('gsKisiGo'),lbl=b.innerHTML;b.disabled=true;b.innerHTML='<span class="spinner-border spinner-border-sm"></span> Menyusun…';
+  try{
+    const sys='Anda guru SD dan penyusun kisi-kisi soal ahli Kurikulum Merdeka. Keluarkan HANYA JSON valid sesuai skema.';
+    const need=[['pg','PG (pilihan ganda)'],['is','IS (isian singkat)'],['mj','MJ (menjodohkan, dihitung per pasangan)'],['ur','UR (uraian)']].filter(x=>f[x[0]]).map(x=>'- '+x[1]+': '+f[x[0]]+' butir').join('\n');
+    const prompt=`Susun KISI-KISI soal (bukan soalnya).\nMata pelajaran: ${f.mapel}\nKelas: ${f.kelas} SD (Kurikulum Merdeka)\nTopik: ${f.topik}\n${f.tp?'Tujuan pembelajaran: '+f.tp+'\n':''}Tingkat kesulitan: ${f.level}\n\nJumlah butir soal yang akan dibuat:\n${need}\n\nAturan: total "jumlah" untuk tiap bentuk harus PERSIS sama dengan jumlah di atas. Beberapa butir dengan indikator yang sama digabung dalam satu baris (jumlah lebih dari 1). Indikator berawalan "Disajikan ..., peserta didik dapat ...". level: "L1" (pengetahuan & pemahaman), "L2" (aplikasi), "L3" (penalaran/HOTS); sebarkan sesuai tingkat kesulitan.\nKeluarkan HANYA JSON: {"kisi":[{"bentuk":"PG","jumlah":2,"tp":"","materi":"","indikator":"","level":"L1"}]}`;
+    const d=aiJson(await aiText(prompt,{system:sys,json:true,temp:0.5,max:6000})),arr=Array.isArray(d.kisi)?d.kisi:[],rows=[];
+    ['pg','is','mj','ur'].forEach(k=>{
+      const B=KISI_KODE[k],need=f[k];if(!need)return;
+      let list=arr.filter(x=>x&&kisiKode(x.bentuk)===B).map(x=>({tp:String(x.tp||''),materi:String(x.materi||''),indikator:String(x.indikator||''),level:aiLevel(x.level),jml:Math.max(1,Math.floor(+x.jumlah||1))}));
+      if(!list.length)list=[{tp:f.tp||f.topik,materi:f.topik,indikator:'Peserta didik dapat menyelesaikan soal tentang '+f.topik,level:'L1',jml:need}];
+      let rem=need;const fit=[];list.forEach(x=>{if(rem<=0)return;const j=Math.min(x.jml,rem);x.jml=j;fit.push(x);rem-=j});
+      if(rem>0)fit[fit.length-1].jml+=rem; // samakan total dengan jumlah soal yang diminta
+      let no=1;fit.forEach(x=>{rows.push({key:'',b:B,tp:x.tp,materi:x.materi,indikator:x.indikator,level:x.level,nums:Array.from({length:x.jml},(_,i)=>no+i)});no+=x.jml});
+    });
+    GS.kisi=rows;GS.kf=f;gsKisiTampil();$('gsKisiOut').scrollIntoView({behavior:'smooth'});toast('Selesai','Kisi-kisi siap. Anda dapat mengedit langsung sebelum diunduh.','success');
+  }catch(e){if(e.message==='NOKEY')aiSettingsUI(gsKisiSaja);else fail(e)}
+  finally{b.disabled=false;b.innerHTML=lbl}
 }
 
 // ============================================================
